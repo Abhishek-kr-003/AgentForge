@@ -13,6 +13,7 @@ IGNORED_FILES = {
     ".env",
 }
 
+#================LIST FILES================
 def list_files(project_path: str)->list[str]:
    path = Path(project_path)
 
@@ -36,6 +37,7 @@ def list_files(project_path: str)->list[str]:
    return files
 
 
+#================READ FILE================
 def read_file(project_path: str, file_path: str) -> str:
     project = Path(project_path).resolve()
     target_file = (project / file_path).resolve()
@@ -74,7 +76,7 @@ def read_file(project_path: str, file_path: str) -> str:
     return target_file.read_text(encoding="utf-8")
 
 
-
+#================SEARCH CODE================
 def search_code(project_path: str, query: str) -> list[dict]:
     project = Path(project_path).resolve()
 

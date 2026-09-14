@@ -2,8 +2,8 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
-from services.gemini import generate_response
-
+#from services.gemini import generate_response  for generating responses using Gemini API
+from backend.services.gemini import run_agent
 
 app = FastAPI()
 
@@ -28,7 +28,11 @@ def root():
 
 @app.post("/api/chat")
 def chat(request: ChatRequest):
-    answer = generate_response(request.message)
+    project_path = r"C:\Users\LOQ\OneDrive\Desktop\AgentForge"
+    answer = run_agent(
+        request.message,
+        project_path
+    )
 
     return {
         "message": answer
