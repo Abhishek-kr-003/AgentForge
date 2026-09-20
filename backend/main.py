@@ -5,6 +5,14 @@ from pydantic import BaseModel
 #from services.gemini import generate_response  for generating responses using Gemini API
 from backend.services.gemini import run_agent
 
+class Message(BaseModel):
+    role: str
+    content: str
+
+class ChatRequest(BaseModel):
+    message: str
+    messages: list[Message]
+
 app = FastAPI()
 
 app.add_middleware(
@@ -14,11 +22,6 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
-
-
-class ChatRequest(BaseModel):
-    message: str
 
 
 @app.get("/")
@@ -31,7 +34,8 @@ def chat(request: ChatRequest):
     project_path = r"C:\Users\LOQ\OneDrive\Desktop\AgentForge"
     answer = run_agent(
         request.message,
-        project_path
+        project_path,
+        request.messages
     )
 
     return {

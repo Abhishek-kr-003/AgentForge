@@ -2,9 +2,20 @@ import { useState } from "react";
 
 function App() {
   const [message, setMessage] = useState("");
-  const [response, setResponse] = useState("");
+  
+  const [messages, setMessages] = useState([]);
 
   const sendMessage = async () => {
+     setMessages((previousMessages) => [
+    ...previousMessages,
+    {
+      role: "user",
+      content: message,
+    },
+  ]);
+
+  setMessage("");
+
     const result = await fetch("http://localhost:8000/api/chat", {
       method: "POST",
       headers: {
@@ -12,12 +23,19 @@ function App() {
       },
       body: JSON.stringify({
         message: message,
+        messages: messages,
       }),
     });
 
     const data = await result.json();
 
-    setResponse(data.message);
+    setMessages((previousMessages) => [
+  ...previousMessages,
+  {
+    role: "assistant",
+    content: data.message,
+  },
+]);
   };
 
   return (
@@ -34,7 +52,24 @@ function App() {
         Send
       </button>
 
-      <p>{response}</p>
+     <div className="chat-container">
+  {messages.map((msg, index) => (
+    <div
+      key={index}
+      className={
+        msg.role === "user"
+          ? "message user-message"
+          : "message assistant-message"
+      }
+    >
+      <strong>
+        {msg.role === "user" ? "You" : "AgentForge"}
+      </strong>
+
+      <p>{msg.content}</p>
+    </div>
+  ))}
+</div>
     </div>
   );
 }

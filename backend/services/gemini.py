@@ -18,7 +18,11 @@ list_files_tool = types.Tool(
         types.FunctionDeclaration(
             name="list_files",
             description=(
-                "List all relevant files in the project."
+                            
+                "List all relevant files in the project. "
+                "Use this when you need to discover the project's file structure "
+                "or find which files are available."
+
             ),
             parameters={
                 "type": "object",
@@ -33,7 +37,8 @@ read_file_tool = types.Tool(
         types.FunctionDeclaration(
             name="read_file",
             description=(
-                "Read the contents of a specific file in the project."
+                "Read the contents of a specific file in the project. "
+                "Use this when you already know which file you need to inspect."
             ),
             parameters={
                 "type": "object",
@@ -56,8 +61,10 @@ search_code_tool = types.Tool(
         types.FunctionDeclaration(
             name="search_code",
             description=(
-                "Search the project source code for a text string. "
-                "Returns matching files, line numbers, and matching lines."
+               "Search the project source code for a text string. "
+               "Returns matching files, line numbers, and matching lines. "
+               "Use this when you need to find where a specific class, function, "
+               "variable, import, or text appears in the code."
             ),
             parameters={
                 "type": "object",
@@ -122,18 +129,32 @@ def execute_tool(function_call, project_path: str):
     )
 
 
-def run_agent(message: str, project_path: str):
+def run_agent(message: str, project_path: str, messages):
 
-    contents = [
-        types.Content(
-            role="user",
+    contents = []
+
+    for msg in messages:
+        contents.append(
+          types.Content(
+            role=msg.role,
             parts=[
                 types.Part.from_text(
-                    text=message
+                    text=msg.content
                 )
             ],
         )
-    ]
+    )
+
+    contents.append(
+        types.Content(
+        role="user",
+        parts=[
+            types.Part.from_text(
+                text=message
+            )
+        ],
+    )
+)
 
     while True:
 
@@ -155,16 +176,20 @@ def run_agent(message: str, project_path: str):
             print("Function:", function_call.name)
             print("Arguments:", function_call.args)
 
+        try:
             result = execute_tool(
-                function_call,
-                project_path
-            )
+               function_call,
+               project_path
+          )
+
+        except Exception as error:
+             result = f"Tool execution failed: {error}"
             
 
-            print("Tool result:")
-            print(result)
+             print("Tool result:")
+             print(result)
 
-            tool_parts.append(
+        tool_parts.append(
                 types.Part.from_function_response(
                     name=function_call.name,
                     response={
@@ -191,9 +216,14 @@ if __name__ == "__main__":
     project_path = r"C:\Users\LOQ\OneDrive\Desktop\AgentForge"
 
     answer = run_agent(
-    "Find the file that contains the FastAPI backend and then read that file and explain how the backend works.",
-    project_path
+     #"Read the file backend/does_not_exist.py and tell me what is inside it.",    #for testing error handling
+    "Find the file that contains the FastAPI backend and then read that file and explain how the backend works.",    #for testing search and read
+    #"List the files available in the backend folder.",    #for testing list files
+    #"Explain what is inside backend/main.py.",    #for testing read file
+    # "Find where FastAPI is used in the project.",    #for testing search
+    project_path,
+    []
 )
 
-print("\nFinal answer:")
-print(answer)
+    print("\nFinal answer:")
+    print(answer)

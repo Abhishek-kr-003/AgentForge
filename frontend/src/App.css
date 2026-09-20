@@ -182,3 +182,35 @@
     border-right-color: var(--border);
   }
 }
+
+.chat-container {
+  width: 700px;
+  max-width: 90%;
+  margin: 20px auto;
+  display: flex;
+  flex-direction: column;
+  gap: 15px;
+}
+
+.message {
+  padding: 12px 16px;
+  border-radius: 12px;
+  max-width: 75%;
+}
+
+.user-message {
+  align-self: flex-end;
+  background: #2563eb;
+  color: white;
+}
+
+.assistant-message {
+  align-self: flex-start;
+  background: #27272a;
+  color: white;
+}
+
+.message p {
+  margin: 5px 0 0;
+  white-space: pre-wrap;
+}
