@@ -31,12 +31,19 @@ def root():
 
 @app.post("/api/chat")
 def chat(request: ChatRequest):
+
+    print("CHAT REQUEST RECEIVED")
+    print("Message:", request.message)
+
     project_path = r"C:\Users\LOQ\OneDrive\Desktop\AgentForge"
+
     answer = run_agent(
         request.message,
         project_path,
         request.messages
     )
+
+    print("AGENT RESPONSE:", answer)
 
     return {
         "message": answer

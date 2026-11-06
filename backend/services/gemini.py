@@ -5,24 +5,30 @@ from google.genai import errors
 from dotenv import load_dotenv
 from google import genai
 from google.genai import types
+
 from backend.tools.filesystem import search_code, list_files, read_file
 
+
 load_dotenv()
+
 
 client = genai.Client(
     api_key=os.getenv("GEMINI_API_KEY")
 )
+
+
+# -----------------------------
+# LIST FILES TOOL
+# -----------------------------
 
 list_files_tool = types.Tool(
     function_declarations=[
         types.FunctionDeclaration(
             name="list_files",
             description=(
-                            
                 "List all relevant files in the project. "
                 "Use this when you need to discover the project's file structure "
                 "or find which files are available."
-
             ),
             parameters={
                 "type": "object",
@@ -31,6 +37,11 @@ list_files_tool = types.Tool(
         )
     ]
 )
+
+
+# -----------------------------
+# READ FILE TOOL
+# -----------------------------
 
 read_file_tool = types.Tool(
     function_declarations=[
@@ -47,7 +58,7 @@ read_file_tool = types.Tool(
                         "type": "string",
                         "description": (
                             "Path of the file relative to the project directory."
-                        )
+                        ),
                     }
                 },
                 "required": ["file_path"],
@@ -56,22 +67,27 @@ read_file_tool = types.Tool(
     ]
 )
 
+
+# -----------------------------
+# SEARCH CODE TOOL
+# -----------------------------
+
 search_code_tool = types.Tool(
     function_declarations=[
         types.FunctionDeclaration(
             name="search_code",
             description=(
-               "Search the project source code for a text string. "
-               "Returns matching files, line numbers, and matching lines. "
-               "Use this when you need to find where a specific class, function, "
-               "variable, import, or text appears in the code."
+                "Search the project source code for a text string. "
+                "Returns matching files, line numbers, and matching lines. "
+                "Use this when you need to find where a specific class, function, "
+                "variable, import, or text appears in the code."
             ),
             parameters={
                 "type": "object",
                 "properties": {
                     "query": {
                         "type": "string",
-                        "description": "Text to search for in the project."
+                        "description": "Text to search for in the project.",
                     }
                 },
                 "required": ["query"],
@@ -80,33 +96,21 @@ search_code_tool = types.Tool(
     ]
 )
 
+
+# All tools available to Gemini
 tools = [
-    list_files_tool, 
-    read_file_tool, 
+    list_files_tool,
+    read_file_tool,
     search_code_tool,
-]            
-               
+]
 
 
-def generate_response(message: str) -> str:
-    max_retries = 3
-
-    for attempt in range(max_retries):
-        try:
-            response = client.models.generate_content(
-                model="gemini-2.5-flash",
-                contents=message,
-            )
-            return response.text
-
-        except errors.ServerError as error:
-           print(f"Gemini server error: {error}")
-           if attempt == max_retries - 1:
-            raise
-           time.sleep(2)
-
+# -----------------------------
+# TOOL EXECUTION
+# -----------------------------
 
 def execute_tool(function_call, project_path: str):
+
     if function_call.name == "list_files":
         return list_files(project_path)
 
@@ -116,80 +120,104 @@ def execute_tool(function_call, project_path: str):
 
     if function_call.name == "search_code":
         query = function_call.args["query"]
-
-        return search_code(
-            project_path, 
-            query
-        )
-
-    
+        return search_code(project_path, query)
 
     raise ValueError(
-       f"Unknown tool: {function_call.name}"
+        f"Unknown tool: {function_call.name}"
     )
 
 
+# -----------------------------
+# AGENT
+# -----------------------------
+
 def run_agent(message: str, project_path: str, messages):
 
+    # Build conversation history
     contents = []
 
     for msg in messages:
+
+        role = msg.role
+
+        # Gemini uses "model" for assistant responses
+        if role == "assistant":
+            role = "model"
+
         contents.append(
-          types.Content(
-            role=msg.role,
+            types.Content(
+                role=role,
+                parts=[
+                    types.Part.from_text(
+                        text=msg.content
+                    )
+                ],
+            )
+        )
+
+    # Add the current user message
+    contents.append(
+        types.Content(
+            role="user",
             parts=[
                 types.Part.from_text(
-                    text=msg.content
+                    text=message
                 )
             ],
         )
     )
 
-    contents.append(
-        types.Content(
-        role="user",
-        parts=[
-            types.Part.from_text(
-                text=message
-            )
-        ],
-    )
-)
-
+    # Agent loop
     while True:
 
-        response = client.models.generate_content(
-            model="gemini-2.5-flash",
-            contents=contents,
-            config={
-                "tools": tools
-            },
-        )
+        try:
+
+            response = client.models.generate_content(
+                model="gemini-2.5-flash",
+                contents=contents,
+                config={
+                    "tools": tools
+                },
+            )
+
+        except errors.ServerError as error:
+
+            print(f"Gemini server error: {error}")
+
+            return (
+                "Gemini is temporarily unavailable due to high demand. "
+                "Please try again in a few seconds."
+            )
+
         print("Gemini response received")
 
+        # Gemini has finished and does not need a tool
         if not response.function_calls:
             return response.text
 
         tool_parts = []
 
+        # Execute requested tools
         for function_call in response.function_calls:
+
             print("Function:", function_call.name)
             print("Arguments:", function_call.args)
 
-        try:
-            result = execute_tool(
-               function_call,
-               project_path
-          )
+            try:
 
-        except Exception as error:
-             result = f"Tool execution failed: {error}"
-            
+                result = execute_tool(
+                    function_call,
+                    project_path
+                )
 
-             print("Tool result:")
-             print(result)
+            except Exception as error:
 
-        tool_parts.append(
+                result = f"Tool execution failed: {error}"
+
+            print("Tool result:")
+            print(result)
+
+            tool_parts.append(
                 types.Part.from_function_response(
                     name=function_call.name,
                     response={
@@ -198,6 +226,7 @@ def run_agent(message: str, project_path: str, messages):
                 )
             )
 
+        # Add Gemini's tool request to conversation
         contents.append(
             types.Content(
                 role="model",
@@ -205,6 +234,7 @@ def run_agent(message: str, project_path: str, messages):
             )
         )
 
+        # Add tool results to conversation
         contents.append(
             types.Content(
                 role="user",
@@ -212,18 +242,21 @@ def run_agent(message: str, project_path: str, messages):
             )
         )
 
+
+# -----------------------------
+# TESTING
+# -----------------------------
+
 if __name__ == "__main__":
+
     project_path = r"C:\Users\LOQ\OneDrive\Desktop\AgentForge"
 
     answer = run_agent(
-     #"Read the file backend/does_not_exist.py and tell me what is inside it.",    #for testing error handling
-    "Find the file that contains the FastAPI backend and then read that file and explain how the backend works.",    #for testing search and read
-    #"List the files available in the backend folder.",    #for testing list files
-    #"Explain what is inside backend/main.py.",    #for testing read file
-    # "Find where FastAPI is used in the project.",    #for testing search
-    project_path,
-    []
-)
+        "Find the file that contains the FastAPI backend "
+        "and then read that file and explain how the backend works.",
+        project_path,
+        []
+    )
 
     print("\nFinal answer:")
     print(answer)
