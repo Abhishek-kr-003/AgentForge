@@ -1,25 +1,56 @@
+
 import os
 import time
+from pathlib import Path
 
-from google.genai import errors
 from dotenv import load_dotenv
 from google import genai
-from google.genai import types
+from google.genai import errors, types
 
-from backend.tools.filesystem import search_code, list_files, read_file
-
-
-load_dotenv()
-
-
-client = genai.Client(
-    api_key=os.getenv("GEMINI_API_KEY")
+from backend.tools.filesystem import (
+    search_code,
+    list_files,
+    read_file,
 )
 
 
-# -----------------------------
+# ========================================
+# ENVIRONMENT CONFIGURATION
+# ========================================
+
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+
+# Load .env from AgentForge root directory
+load_dotenv(PROJECT_ROOT / ".env")
+
+API_KEY = os.getenv("GEMINI_API_KEY")
+
+if not API_KEY:
+    raise ValueError(
+        "GEMINI_API_KEY not found. Check your root .env file."
+    )
+
+client = genai.Client(
+    api_key=API_KEY,
+    http_options=types.HttpOptions(
+        api_version="v1beta"
+    )
+)
+# ========================================
+# AGENT CONFIGURATION
+# ========================================
+
+MODEL_NAME = "gemini-2.5-flash"
+
+MAX_AGENT_ITERATIONS = 8
+MAX_RETRIES = 3
+
+RETRY_DELAY = 2
+
+
+# ========================================
 # LIST FILES TOOL
-# -----------------------------
+# ========================================
 
 list_files_tool = types.Tool(
     function_declarations=[
@@ -27,8 +58,8 @@ list_files_tool = types.Tool(
             name="list_files",
             description=(
                 "List all relevant files in the project. "
-                "Use this when you need to discover the project's file structure "
-                "or find which files are available."
+                "Use this when you need to discover the project's "
+                "file structure or find available files."
             ),
             parameters={
                 "type": "object",
@@ -39,9 +70,9 @@ list_files_tool = types.Tool(
 )
 
 
-# -----------------------------
+# ========================================
 # READ FILE TOOL
-# -----------------------------
+# ========================================
 
 read_file_tool = types.Tool(
     function_declarations=[
@@ -49,7 +80,8 @@ read_file_tool = types.Tool(
             name="read_file",
             description=(
                 "Read the contents of a specific file in the project. "
-                "Use this when you already know which file you need to inspect."
+                "Use this when you already know which file you need "
+                "to inspect."
             ),
             parameters={
                 "type": "object",
@@ -57,7 +89,8 @@ read_file_tool = types.Tool(
                     "file_path": {
                         "type": "string",
                         "description": (
-                            "Path of the file relative to the project directory."
+                            "Path of the file relative to the "
+                            "project directory."
                         ),
                     }
                 },
@@ -68,26 +101,26 @@ read_file_tool = types.Tool(
 )
 
 
-# -----------------------------
+# ========================================
 # SEARCH CODE TOOL
-# -----------------------------
+# ========================================
 
 search_code_tool = types.Tool(
     function_declarations=[
         types.FunctionDeclaration(
             name="search_code",
             description=(
-                "Search the project source code for a text string. "
-                "Returns matching files, line numbers, and matching lines. "
-                "Use this when you need to find where a specific class, function, "
-                "variable, import, or text appears in the code."
+                "Search project source code for a text string. "
+                "Returns matching files, line numbers, and lines. "
+                "Use this to find functions, classes, variables, "
+                "imports, or other code."
             ),
             parameters={
                 "type": "object",
                 "properties": {
                     "query": {
                         "type": "string",
-                        "description": "Text to search for in the project.",
+                        "description": "Text to search for.",
                     }
                 },
                 "required": ["query"],
@@ -105,9 +138,9 @@ tools = [
 ]
 
 
-# -----------------------------
+# ========================================
 # TOOL EXECUTION
-# -----------------------------
+# ========================================
 
 def execute_tool(function_call, project_path: str):
 
@@ -127,11 +160,54 @@ def execute_tool(function_call, project_path: str):
     )
 
 
-# -----------------------------
-# AGENT
-# -----------------------------
+# ========================================
+# GEMINI API WITH RETRIES
+# ========================================
 
-def run_agent(message: str, project_path: str, messages):
+def generate_with_retry(contents):
+
+    for attempt in range(MAX_RETRIES):
+
+        try:
+
+            response = client.models.generate_content(
+                model=MODEL_NAME,
+                contents=contents,
+                config=types.GenerateContentConfig(
+                    tools=tools,
+                ),
+            )
+
+            return response
+
+        except errors.ServerError as error:
+
+            print(f"Gemini server error: {error}")
+
+            if attempt == MAX_RETRIES - 1:
+                raise
+
+            wait_time = RETRY_DELAY * (2 ** attempt)
+
+            print(
+                f"Retrying in {wait_time} seconds... "
+                f"Attempt {attempt + 2}/{MAX_RETRIES}"
+            )
+
+            time.sleep(wait_time)
+
+    return None
+
+
+# ========================================
+# MAIN AGENT
+# ========================================
+
+def run_agent(
+    message: str,
+    project_path: str,
+    messages,
+):
 
     # Build conversation history
     contents = []
@@ -140,7 +216,7 @@ def run_agent(message: str, project_path: str, messages):
 
         role = msg.role
 
-        # Gemini uses "model" for assistant responses
+        # Gemini uses "model" instead of "assistant"
         if role == "assistant":
             role = "model"
 
@@ -155,7 +231,7 @@ def run_agent(message: str, project_path: str, messages):
             )
         )
 
-    # Add the current user message
+    # Add current user message
     contents.append(
         types.Content(
             role="user",
@@ -167,38 +243,62 @@ def run_agent(message: str, project_path: str, messages):
         )
     )
 
-    # Agent loop
-    while True:
+    # ====================================
+    # AGENT EXECUTION LOOP
+    # ====================================
+
+    for iteration in range(MAX_AGENT_ITERATIONS):
+
+        print(
+            f"Agent iteration: "
+            f"{iteration + 1}/{MAX_AGENT_ITERATIONS}"
+        )
 
         try:
 
-            response = client.models.generate_content(
-                model="gemini-2.5-flash",
-                contents=contents,
-                config={
-                    "tools": tools
-                },
-            )
+            response = generate_with_retry(contents)
 
-        except errors.ServerError as error:
-
-            print(f"Gemini server error: {error}")
+        except errors.ServerError:
 
             return (
-                "Gemini is temporarily unavailable due to high demand. "
-                "Please try again in a few seconds."
+                "Gemini is temporarily unavailable due to "
+                "high demand. Please try again in a few seconds."
+            )
+
+        except Exception as error:
+
+            print(f"Gemini API error: {error}")
+
+            return (
+                "An error occurred while communicating "
+                "with Gemini. Please try again."
+            )
+
+        # Check response
+        if response is None or not response.candidates:
+
+            return (
+                "Gemini returned an empty response. "
+                "Please try again."
             )
 
         print("Gemini response received")
 
-        # Gemini has finished and does not need a tool
-        if not response.function_calls:
-            return response.text
+        # Check whether Gemini wants to use tools
+        function_calls = response.function_calls
+
+        # No tool required: return final response
+        if not function_calls:
+
+            return (
+                response.text
+                or "Gemini could not generate a response."
+            )
 
         tool_parts = []
 
         # Execute requested tools
-        for function_call in response.function_calls:
+        for function_call in function_calls:
 
             print("Function:", function_call.name)
             print("Arguments:", function_call.args)
@@ -207,12 +307,17 @@ def run_agent(message: str, project_path: str, messages):
 
                 result = execute_tool(
                     function_call,
-                    project_path
+                    project_path,
                 )
 
             except Exception as error:
 
-                result = f"Tool execution failed: {error}"
+                print(f"Tool execution error: {error}")
+
+                result = {
+                    "error": str(error),
+                    "status": "failed",
+                }
 
             print("Tool result:")
             print(result)
@@ -221,12 +326,12 @@ def run_agent(message: str, project_path: str, messages):
                 types.Part.from_function_response(
                     name=function_call.name,
                     response={
-                        "result": result
+                        "result": result,
                     },
                 )
             )
 
-        # Add Gemini's tool request to conversation
+        # Add Gemini's tool request to history
         contents.append(
             types.Content(
                 role="model",
@@ -234,7 +339,7 @@ def run_agent(message: str, project_path: str, messages):
             )
         )
 
-        # Add tool results to conversation
+        # Add tool results to history
         contents.append(
             types.Content(
                 role="user",
@@ -242,21 +347,8 @@ def run_agent(message: str, project_path: str, messages):
             )
         )
 
-
-# -----------------------------
-# TESTING
-# -----------------------------
-
-if __name__ == "__main__":
-
-    project_path = r"C:\Users\LOQ\OneDrive\Desktop\AgentForge"
-
-    answer = run_agent(
-        "Find the file that contains the FastAPI backend "
-        "and then read that file and explain how the backend works.",
-        project_path,
-        []
+    # Maximum iteration limit reached
+    return (
+        "The agent reached its maximum execution limit. "
+        "Please try a more specific request."
     )
-
-    print("\nFinal answer:")
-    print(answer)
